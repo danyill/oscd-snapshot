@@ -1,6 +1,10 @@
 /* eslint-disable import/no-extraneous-dependencies */
-import { LitElement } from 'lit';
-import { property } from 'lit/decorators.js';
+import { html, LitElement, TemplateResult } from 'lit';
+import { property, query } from 'lit/decorators.js';
+
+import '@material/mwc-snackbar';
+
+import type { Snackbar } from '@material/mwc-snackbar';
 
 function cloneAttributes(destElement: Element, sourceElement: Element) {
   let attr;
@@ -11,7 +15,41 @@ function cloneAttributes(destElement: Element, sourceElement: Element) {
   }
 }
 
-function snapName(filename: string): string {
+/**
+ * Creates a deep copy of an XML document with proper namespace handling
+ * @param sourceDoc - The source XML document to copy
+ * @param sclNamespace - The root element namespace URI
+ * @returns A new XML document that is a copy of the source
+ */
+function copyDoc(
+  sourceDoc: XMLDocument,
+  sclNamespace: string = 'http://www.iec.ch/61850/2003/SCL',
+): XMLDocument | undefined {
+  const newDoc = document.implementation.createDocument(
+    sclNamespace,
+    'SCL',
+    null,
+  );
+
+  const processingInstruction = newDoc.createProcessingInstruction(
+    'xml',
+    'version="1.0" encoding="UTF-8"',
+  );
+  newDoc.insertBefore(processingInstruction, newDoc.firstChild);
+
+  if (sourceDoc.documentElement) {
+    cloneAttributes(newDoc.documentElement, sourceDoc.documentElement);
+    const importedNode = newDoc.importNode(sourceDoc.documentElement, true);
+    if (newDoc.documentElement) {
+      newDoc.replaceChild(importedNode, newDoc.documentElement);
+    }
+
+    return newDoc;
+  }
+  return undefined;
+}
+
+function snapshotName(filename: string): string {
   // Get current date and format it
   const now: Date = new Date();
   const timestamp: string = `${now.getFullYear()}-${String(
@@ -46,7 +84,12 @@ export default class SnapshotPlugin extends LitElement {
   docName!: string;
 
   @property()
+  userMessage: string = '';
+
+  @property()
   docs: Record<string, XMLDocument> = {};
+
+  @query('#userMessage') userMessageUI?: Snackbar;
 
   async run() {
     const sclNamespace = 'http://www.iec.ch/61850/2003/SCL';
@@ -61,10 +104,24 @@ export default class SnapshotPlugin extends LitElement {
     );
     snapDoc.insertBefore(pi, snapDoc.firstChild);
 
-    // ensure schema revision and namespace definitions are transferred
-    cloneAttributes(snapDoc.documentElement, this.doc.documentElement);
-    snapDoc.importNode(this.doc.documentElement, true);
+    const snapName = snapshotName(this.docName);
+    const newDoc = copyDoc(this.doc);
 
-    this.docs[snapName(this.docName)] = snapDoc;
+    if (newDoc) {
+      this.docs[snapName] = newDoc;
+      this.userMessage = `Snapshot created: ${snapName}`;
+    } else {
+      this.userMessage = `Unable to take snapshot of ${this.docName}`;
+    }
+    if (this.userMessageUI) this.userMessageUI!.show();
+  }
+
+  render(): TemplateResult {
+    return html`
+      <mwc-snackbar
+        id="userMessage"
+        labelText="${this.userMessage}"
+      ></mwc-snackbar>
+    `;
   }
 }
